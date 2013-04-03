@@ -94,6 +94,7 @@ class BaseHandler(webapp.RequestHandler):
                 all_pages[key] = 1
                 if not memcache.set("__all_pages__", all_pages):
                     logging.error("Memcache set failed on __all_pages__")
+
         return item
 
     def not_found(self):
@@ -117,34 +118,43 @@ class UnauthorizedHandler(webapp.RequestHandler):
 class RootHandler(BaseHandler):
 
     def data(self):
-        services = []
         default_status = Status.get_default()
 
-        for service in Service.query().order(Service.list).order(Service.name).fetch(100):
-            event = service.current_event()
-            if event is not None:
-                status = event.status
-            else:
-                status = default_status
+        @ndb.toplevel
+        def get_services():
+            services = []
+            for service in Service.query().order(Service.list).order(Service.name).fetch(100):
+                event = yield service.current_event_async()
+                if event is not None:
+                    status = event.status
+                else:
+                    status = default_status
 
-            today = datetime.today() + timedelta(days=1)
-            current, = service.history(1, default_status, start=today)
-            has_issues = current["information"] and status.key == default_status.key
+                today = datetime.today() + timedelta(days=1)
+                current = yield service.history_async(1, default_status, start=today)
+                
+                current = current[0]
 
-            service_dict = {
-                "slug": service.slug,
-                "name": service.name,
-                "url": service.url(),
-                "status": status,
-                "has_issues": has_issues,
-                "history": service.history(5, default_status),
-                }
-            services.append(service_dict)
+                has_issues = current["information"] and status.key == default_status.key
+
+                history = yield service.history_async(5, default_status)
+
+                service_dict = {
+                    "slug": service.slug,
+                    "name": service.name,
+                    "url": service.url(),
+                    "status": status,
+                    "has_issues": has_issues,
+                    "history": history,
+                    }
+                services.append(service_dict)
+
+            raise ndb.Return(services)
 
         return {
             "days": get_past_days(5),
             "statuses": Status.query().fetch(100),
-            "services": services,
+            "services": get_services(),
             }
 
     def get(self):
@@ -157,37 +167,46 @@ class ListHandler(BaseHandler):
 
     list = None
 
-    def data(self):
-        services = []
+    def data(self):        
         default_status = Status.get_default()
 
-        query = Service.query().filter(Service.list == self.list).order(Service.name)
+        @ndb.toplevel
+        def get_services():
+            services = []
+            query = Service.query().filter(Service.list == self.list).order(Service.name)
 
-        for service in query.fetch(100):
-            event = service.current_event()
-            if event is not None:
-                status = event.status
-            else:
-                status = default_status
+            for service in query.fetch(100):
+                event = yield service.current_event_async()
+                if event is not None:
+                    status = event.status
+                else:
+                    status = default_status
 
-            today = datetime.today() + timedelta(days=1)
-            current, = service.history(1, default_status, start=today)
-            has_issues = current["information"] and status.key == default_status.key
+                today = datetime.today() + timedelta(days=1)
+                current = yield service.history_async(1, default_status, start=today)
+                
+                current = current[0]
 
-            service_dict = {
-                "slug": service.slug,
-                "name": service.name,
-                "url": service.url(),
-                "status": status,
-                "has_issues": has_issues,
-                "history": service.history(5, default_status),
-                }
-            services.append(service_dict)
+                has_issues = current["information"] and status.key == default_status.key
+
+                history = yield service.history_async(5, default_status)
+
+                service_dict = {
+                    "slug": service.slug,
+                    "name": service.name,
+                    "url": service.url(),
+                    "status": status,
+                    "has_issues": has_issues,
+                    "history": history,
+                    }
+                services.append(service_dict)
+
+            raise ndb.Return(services)
 
         return {
             "days": get_past_days(5),
             "statuses": Status.query().fetch(100),
-            "services": services,
+            "services": get_services(),
             }
 
     def get(self, list_slug):
@@ -208,7 +227,6 @@ class ListListHandler(BaseHandler):
     statuses = []
 
     def data(self):
-        services = []
         default_status = Status.get_default()
 
         lists = []
@@ -217,33 +235,43 @@ class ListListHandler(BaseHandler):
             if l is not None:
                 lists.append(l)
 
-        for service in Service.query().filter(Service.list in lists).order(Service.name).fetch(100):
-            event = service.current_event()
-            if event is not None:
-                status = event.status
-            else:
-                status = default_status
+        @ndb.toplevel
+        def get_services():
+            services = []
+            for service in Service.query().filter(Service.list in lists).order(Service.name).fetch(100):
+                event = yield service.current_event_async()
+                if event is not None:
+                    status = event.status
+                else:
+                    status = default_status
 
-            if len(self.statuses) and not status.slug in self.statuses: continue
+                if len(self.statuses) and not status.slug in self.statuses: continue
 
-            today = datetime.today() + timedelta(days=1)
-            current, = service.history(1, default_status, start=today)
-            has_issues = current["information"] and status.key == default_status.key
+                today = datetime.today() + timedelta(days=1)
+                current = yield service.history_async(1, default_status, start=today)
+                
+                current = current[0]
 
-            service_dict = {
-                "slug": service.slug,
-                "name": service.name,
-                "url": service.url(),
-                "status": status,
-                "has_issues": has_issues,
-                "history": service.history(5, default_status),
-                }
-            services.append(service_dict)
+                has_issues = current["information"] and status.key == default_status.key
+
+                history = yield service.history_async(5, default_status)
+
+                service_dict = {
+                    "slug": service.slug,
+                    "name": service.name,
+                    "url": service.url(),
+                    "status": status,
+                    "has_issues": has_issues,
+                    "history": history,
+                    }
+                services.append(service_dict)
+
+            raise ndb.Return(services)
 
         return {
             "days": get_past_days(5),
             "statuses": Status.query().fetch(100),
-            "services": services,
+            "services": get_services(),
             }
 
     def get(self):
@@ -261,22 +289,27 @@ class ListListHandler(BaseHandler):
 class ListSummaryHandler(BaseHandler):
 
     def data(self):
-        lists = {}
+        
         default_status = Status.get_default()
 
-        for service in Service.query.order(Service.list).fetch(100):
-            event = service.current_event()
-            if event is not None:
-                status = event.status
-            else:
-                status = default_status
+        @ndb.toplevel
+        def get_lists():
+            lists = {}
+            for service in Service.query.order(Service.list).fetch(100):
+                event = yield service.current_event_async()
+                if event is not None:
+                    status = event.status
+                else:
+                    status = default_status
 
-            if service.list and not lists.has_key(service.list.slug) or \
-                lists[service.list.slug]["status"].name < status.name:
-                lists[service.list.slug] = {"list": service.list, "status": status}
+                if service.list and not lists.has_key(service.list.slug) or \
+                    lists[service.list.slug]["status"].name < status.name:
+                    lists[service.list.slug] = {"list": service.list, "status": status}
+
+            raise ndb.Return(lists)
 
         return {
-            "lists": lists.items(),
+            "lists": get_lists(),
             "statuses": Status.query().fetch(100),
             }
 

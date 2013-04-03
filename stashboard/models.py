@@ -142,11 +142,17 @@ class Service(ndb.Model):
         event = self.events.order(-Event.start).get()
         return event
 
+    @ndb.tasklet
+    def current_event_async(self):
+        event = yield self.events.order(-Event.start).fetch_async(1)
+        raise ndb.Return(event[0])
+
     def url(self):
         return "/services/%s" % self.slug
 
     #Specialty function for front page
-    def history(self, days, default, start=None):
+    @ndb.tasklet
+    def history_async(self, days, default, start=None):
         """ Return the past n days of activity AFTER the start date.
 
         Arguments:
@@ -161,8 +167,7 @@ class Service(ndb.Model):
         start = start or datetime.today()
         ago = start - timedelta(days=days)
 
-        events = self.events.filter(Event.start >= ago) \
-            .filter(Event.start < start).fetch(100)
+        events = yield self.events.filter(Event.start >= ago).filter(Event.start < start).fetch_async(100)
 
         stats = {}
 
@@ -185,7 +190,7 @@ class Service(ndb.Model):
         history.sort()
         history.reverse()
 
-        return history
+        raise ndb.Return(history)
 
 
     def compare(self, other_status):

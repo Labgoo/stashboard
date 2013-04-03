@@ -61,8 +61,6 @@ def invalidate_cache():
                 logging.error("Memcache delete failed on %s", page)
     if not memcache.delete("__all_pages__"):
         logging.error("Memcache delete failed on __all_pages__")
-    taskqueue.add(url='/', method="GET")
-
 
 def aware_to_naive(d):
     """Convert an aware date to an naive date, in UTC"""
