@@ -19,28 +19,26 @@
 # THE SOFTWARE.
 
 import os
-import datetime
 import logging
 import urlparse
-from datetime import timedelta
-from datetime import date
-from google.appengine.ext import db
-from django.utils import simplejson as json
+from datetime import timedelta, date, datetime
+from google.appengine.ext import ndb
+import json
 from time import mktime
 from wsgiref.handlers import format_date_time
 
 
-class InternalEvent(db.Model):
+class InternalEvent(ndb.Model):
     """An event that happens internally that we need to track. If the event
     exists, that mean the event happened.
 
     Properties:
     name -- string: The name of this event
     """
-    name = db.StringProperty(required=True)
+    name = ndb.StringProperty(required=True)
 
 
-class Image(db.Model):
+class Image(ndb.Model):
     """A service to track
 
     Properties:
@@ -49,26 +47,30 @@ class Image(db.Model):
     path -- stirng: The path to the image
 
     """
-    slug = db.StringProperty(required=True)
-    icon_set = db.StringProperty(required=True)
-    path = db.StringProperty(required=True)
+
+    icon_set = ndb.StringProperty(required=True)
+    path = ndb.StringProperty(required=True)
+
+    @property
+    def slug(self):
+        return self.key.id()
 
     @classmethod
     def get_by_slug(cls, slug):
-        return cls.all().filter('slug = ', slug).get()
+        return  cls.get_by_id(slug)
 
     @classmethod
     def load_defaults(cls):
         path = os.path.join(os.path.dirname(__file__), "fixtures/images.json")
         images = json.load(open(path))
         for i in images:
-            image = Image(slug=i["name"], icon_set=i["set"], path=i["url"])
+            image = Image(id=i["name"], icon_set=i["set"], path=i["url"])
             image.put()
 
     def absolute_url(self):
         return "/images/" + self.path
 
-class List(db.Model):
+class List(ndb.Model):
     """A list to group service
 
     Properties:
@@ -77,13 +79,16 @@ class List(db.Model):
     slug        -- string: URL friendly version of the name
 
     """
-    @staticmethod
-    def get_by_slug(list_slug):
-        return List.all().filter('slug = ', list_slug).get()
+    @classmethod
+    def get_by_slug(cls, slug):
+        return  cls.get_by_id(slug)
 
-    slug = db.StringProperty(required=True)
-    name = db.StringProperty(required=True)
-    description = db.StringProperty(required=True)
+    @property
+    def slug(self):
+        return self.key.id()
+
+    name = ndb.StringProperty(required=True)
+    description = ndb.StringProperty(required=True)
 
     def url(self):
         return "/service-lists/%s" % self.slug
@@ -92,7 +97,7 @@ class List(db.Model):
         return 0
 
     def sid(self):
-        return unicode(self.key())
+        return unicode(self.key)
 
     def resource_url(self):
         return "/service-lists/" + self.slug
@@ -108,9 +113,7 @@ class List(db.Model):
 
         return m
 
-
-
-class Service(db.Model):
+class Service(ndb.Model):
     """A service to track
 
     Properties:
@@ -119,17 +122,24 @@ class Service(db.Model):
     slug        -- stirng: URL friendly version of the name
 
     """
-    @staticmethod
-    def get_by_slug(service_slug):
-        return Service.all().filter('slug = ', service_slug).get()
+    @classmethod
+    def get_by_slug(cls, slug):
+        return  cls.get_by_id(slug)
 
-    slug = db.StringProperty(required=True)
-    name = db.StringProperty(required=True)
-    description = db.StringProperty(required=True)
-    list = db.ReferenceProperty(List)
+    @property
+    def slug(self):
+        return self.key.id()
+
+    name = ndb.StringProperty(required=True)
+    description = ndb.StringProperty(required=True)
+    list = ndb.KeyProperty(List)
+
+    @property
+    def events(self):
+        return Event.query().filter(Event.service == self.key)
 
     def current_event(self):
-        event = self.events.order('-start').get()
+        event = self.events.order(-Event.start).get()
         return event
 
     def url(self):
@@ -148,11 +158,11 @@ class Service(db.Model):
 
         This funciton is currently only used on the front page
         """
-        start = start or date.today()
+        start = start or datetime.today()
         ago = start - timedelta(days=days)
 
-        events = self.events.filter('start >=', ago) \
-            .filter('start <', start).fetch(100)
+        events = self.events.filter(Event.start >= ago) \
+            .filter(Event.start < start).fetch(100)
 
         stats = {}
 
@@ -166,7 +176,7 @@ class Service(db.Model):
             }
 
         for event in events:
-            if event.status.slug != default.slug:
+            if event.status != default.key:
                 stats[event.start.day]["image"] = "icons/fugue/information.png"
                 stats[event.start.day]["information"] = True
                 stats[event.start.day]["name"] = "information"
@@ -182,7 +192,7 @@ class Service(db.Model):
         return 0
 
     def sid(self):
-        return unicode(self.key())
+        return unicode(self.key)
 
     def resource_url(self):
         return "/services/" + self.slug
@@ -198,18 +208,18 @@ class Service(db.Model):
 
         event = self.current_event()
         if event:
-            m["current-event"] = event.rest(base_url)
+            m["current-event"] = event.get().rest(base_url)
         else:
             m["current-event"] = None
 
         if self.list:
-            m["list"] = self.list.rest(base_url)
+            m["list"] = self.list.get().rest(base_url)
         else:
             m["list"] = None
 
         return m
 
-class Status(db.Model):
+class Status(ndb.Model):
     """A possible system status
 
     Properties:
@@ -220,12 +230,16 @@ class Status(db.Model):
 
     """
     @classmethod
-    def get_by_slug(cls, status_slug):
-        return cls.all().filter('slug = ', status_slug).get()
+    def get_by_slug(cls, slug):
+        return  cls.get_by_id(slug)
+
+    @property
+    def slug(self):
+        return self.key.id()
 
     @classmethod
     def get_default(cls):
-        return cls.all().filter('default = ', True).get()
+        return cls.query().filter(cls.default == True).get()
 
     @classmethod
     def load_defaults(cls):
@@ -233,31 +247,30 @@ class Status(db.Model):
         Install the default statuses. xI am not sure where these should live just yet
         """
         if not cls.get_by_slug("down"):
-            d = cls(name="Down", slug="down",
+            d = cls(name="Down", id="down",
                     image="icons/fugue/cross-circle.png",
                     description="The service is currently down")
             d.put()
 
         if not cls.get_by_slug("up"):
-            u = cls(name="Up", slug="up", default=True,
+            u = cls(name="Up", id="up", default=True,
                     image="icons/fugue/tick-circle.png",
                     description="The service is up")
             u.put()
 
         if not cls.get_by_slug("warning"):
-            w = cls(name="Warning", slug="warning",
+            w = cls(name="Warning", id="warning",
                     image="icons/fugue/exclamation.png",
                     description="The service is experiencing intermittent problems")
             w.put()
 
-    name = db.StringProperty(required=True)
-    slug = db.StringProperty(required=True)
-    description = db.StringProperty(required=True)
-    image = db.StringProperty(required=True)
-    default = db.BooleanProperty(default=False)
+    name = ndb.StringProperty(required=True)
+    description = ndb.StringProperty(required=True)
+    image = ndb.StringProperty(required=True)
+    default = ndb.BooleanProperty(default=False)
 
     # Deprecated
-    severity = db.IntegerProperty(default=10)
+    severity = ndb.IntegerProperty(default=10)
 
     def image_url(self):
         return "/images/" + unicode(self.image)
@@ -290,17 +303,16 @@ class Status(db.Model):
         return m
 
 
-class Event(db.Model):
+class Event(ndb.Model):
 
-    start = db.DateTimeProperty(required=True, auto_now_add=True)
+    start = ndb.DateTimeProperty(required=True, auto_now_add=True)
 
     # We want this to be required, but it would break all current installs
     # Instead, we handle it in the rest method
-    informational = db.BooleanProperty(default=False)
-    status = db.ReferenceProperty(Status, required=True)
-    message = db.TextProperty(required=True)
-    service = db.ReferenceProperty(Service, required=True,
-        collection_name="events")
+    informational = ndb.BooleanProperty(default=False)
+    status = ndb.KeyProperty(Status, required=True)
+    message = ndb.TextProperty(required=True)
+    service = ndb.KeyProperty(Service, required=True)
 
     def duration(self):
         # calculate the difference between start and end
@@ -308,10 +320,10 @@ class Event(db.Model):
         pass
 
     def sid(self):
-        return unicode(self.key())
+        return unicode(self.key)
 
     def resource_url(self):
-        return self.service.resource_url() + "/events/" + self.sid()
+        return self.service.get().resource_url() + "/events/" + self.sid()
 
     def rest(self, base_url):
         """ Return a Python object representing this model"""
@@ -321,7 +333,7 @@ class Event(db.Model):
 
         stamp = mktime(self.start.timetuple())
         m["timestamp"] = format_date_time(stamp)
-        m["status"] = self.status.rest(base_url)
+        m["status"] = self.status.get().rest(base_url)
         m["message"] = unicode(self.message)
         m["url"] = base_url + self.resource_url()
 
@@ -332,8 +344,8 @@ class Event(db.Model):
 
         return m
 
-class Profile(db.Model):
-    owner = db.UserProperty(required=True)
-    token = db.StringProperty(required=True)
-    secret = db.StringProperty(required=True)
+class Profile(ndb.Model):
+    owner = ndb.UserProperty(required=True)
+    token = ndb.StringProperty(required=True)
+    secret = ndb.StringProperty(required=True)
 

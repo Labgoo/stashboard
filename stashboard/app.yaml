@@ -51,11 +51,7 @@ handlers:
 
 - url: .*
   script: main.py
-
-admin_console:
-  pages:
-  - name: Memcache
-    url: /console/memcache
+  login: admin
 
 skip_files: |
  ^(.*/)?(

@@ -44,7 +44,7 @@ from google.appengine.api import datastore_errors
 from google.appengine.api import taskqueue
 from google.appengine.api import users
 from google.appengine.ext import webapp
-from google.appengine.ext import db
+from google.appengine.ext import ndb
 from handlers import restful
 from time import mktime
 from utils import authorized
@@ -84,7 +84,7 @@ class ListsListHandler(restful.Controller):
             self.error(404, "API Version %s not supported" % version)
             return
 
-        query = List.all().order('name')
+        query = List.query().order(List.name)
         data = [s.rest(self.base_url(version)) for s in query]
         data = {"lists": data}
         self.json(data)
@@ -96,6 +96,7 @@ class ListsListHandler(restful.Controller):
             return
 
         name = self.request.get('name', default_value=None)
+        slug = self.request.get('slug')
         description = self.request.get('description', default_value=None)
 
         if not name or not description:
@@ -103,14 +104,14 @@ class ListsListHandler(restful.Controller):
                            % (name, description))
             return
 
-        slug = slugify.slugify(name)
+        slug = slug or slugify.slugify(name)
         existing_s = List.get_by_slug(slug)
 
         if existing_s:
             self.error(404, "A list with this name already exists")
             return
 
-        l = List(name=name, slug=slug, description=description)
+        l = List(id=slug, name=name, description=description)
         l.put()
 
         invalidate_cache()
@@ -173,12 +174,10 @@ class ListInstanceHandler(restful.Controller):
             self.error(404, "List %s not found" % list_slug)
             return
 
-        query = Service.all()
-        query.filter('list =', list)
-        if query:
-            for s in query:
-                s.list = None
-                s.put()
+        query = Service.query().filter(Service.list == list)
+        for s in query:
+            s.list = None
+            s.put()
 
         invalidate_cache()
         list.delete()
@@ -192,7 +191,7 @@ class ServicesListHandler(restful.Controller):
             self.error(404, "API Version %s not supported" % version)
             return
 
-        query = Service.all().order('name')
+        query = Service.query().order(Service.name)
         data = [s.rest(self.base_url(version)) for s in query]
         data = {"services": data}
         self.json(data)
@@ -209,7 +208,7 @@ class ServicesListHandler(restful.Controller):
         l = None
 
         if slist:
-            l = List.all().filter("slug =", slist).get()
+            l = List.get_by_id(slist)
 
         if not name:
             self.error(400, "Bad name: %s" % name)
@@ -230,7 +229,7 @@ class ServicesListHandler(restful.Controller):
             self.error(404, "A sevice with this name already exists")
             return
 
-        s = Service(name=name, slug=slug, description=description, list=l)
+        s = Service(name=name, id=slug, description=description, list=l)
         s.put()
 
         invalidate_cache()
@@ -276,7 +275,7 @@ class ServiceInstanceHandler(restful.Controller):
             service.name = name
 
         if list:
-            l = List.all().filter("slug = ", list).get()
+            l = List.get_by_id(list)
 
             if l is None:
                 self.error(400, "Can't find list with slug %s" % list)
@@ -307,11 +306,9 @@ class ServiceInstanceHandler(restful.Controller):
             self.error(404, "Service %s not found" % service_slug)
             return
 
-        query = Event.all()
-        query.filter('service =', service)
-        if query:
-            for e in query:
-                e.delete()
+        query = Event.query().filter(Event.service == service)
+        for e in query:
+            e.key.delete()
 
         invalidate_cache()
         service.delete()
@@ -333,13 +330,12 @@ class EventsListHandler(restful.Controller):
         start = self.request.get('start', default_value=None)
         end = self.request.get('end', default_value=None)
 
-        query = Event.all()
-        query.filter('service =', service)
+        query = Event.query().filter(Event.service == service)
 
         if start:
             try:
                 _start = aware_to_naive(parse(start))
-                query.filter("start >= ", _start)
+                query.filter(Event.start >= _start)
             except:
                 self.error(400, "Invalid Date: %s" % start)
                 return
@@ -347,12 +343,12 @@ class EventsListHandler(restful.Controller):
         if end:
             try:
                 _end = aware_to_naive(parse(end))
-                query.filter("start <=", _end)
+                query.filter(Event.start <= _end)
             except:
                 self.error(400, "Invalid Date: %s" % end)
                 return
 
-        query.order('-start')
+        query.order(-Event.start)
 
         data = [s.rest(self.base_url(version)) for s in query]
         self.json({"events": data})
@@ -390,7 +386,7 @@ class EventsListHandler(restful.Controller):
             self.error(404, "Status %s not found" % status_slug)
             return
 
-        e = Event(status=status, service=service, message=message)
+        e = Event(status=status.key, service=service.key, message=message)
         e.informational = informational and informational == "true"
         e.put()
 
@@ -437,12 +433,12 @@ class EventInstanceHandler(restful.Controller):
             return
 
         try:
-            event = Event.get(db.Key(sid))
+            event = Event.get_by_id(sid)
         except datastore_errors.BadKeyError:
             self.error(404, "Event %s not found" % sid)
             return
 
-        if not event or service.key() != event.service.key():
+        if not event or service.key != event.service.key:
             self.error(404, "No event for Service %s with sid = %s" \
                            % (service_slug, sid))
             return
@@ -463,12 +459,12 @@ class EventInstanceHandler(restful.Controller):
 
 
         try:
-            event = Event.get(db.Key(sid))
+            event = Event.get_by_id(sid)
         except datastore_errors.BadKeyError:
             self.error(404, "Event %s not found" % sid)
             return
 
-        if not event or service.key() != event.service.key():
+        if not event or service.key != event.service.key:
             self.error(404, "No event for Service %s with sid = %s" \
                            % (service_slug, sid))
             return
@@ -486,7 +482,7 @@ class StatusesListHandler(restful.Controller):
             self.error(404, "API Version %s not supported" % version)
             return
 
-        query = Status.all().order('name')
+        query = Status.query().order(Status.name)
 
         data = [s.rest(self.base_url(version)) for s in query]
         self.json({"statuses": data})
@@ -525,12 +521,12 @@ class StatusesListHandler(restful.Controller):
 
         # Reset default status
         if default == "true":
-            for stat in Status.all().filter("default", True):
+            for stat in Status.query().filter(Status.default == True):
                 stat.default = False
                 stat.put()
 
         default = default == "true"
-        status = Status(name=name, slug=slug, description=description,
+        status = Status(name=name, id=slug, description=description,
                         image=image.path, default=default)
         status.put()
         invalidate_cache()
@@ -588,7 +584,7 @@ class StatusInstanceHandler(restful.Controller):
 
             # Reset default status
             if default == "true":
-                for stat in Status.all().filter("default", True):
+                for stat in Status.query().filter(Status.default == True):
                     stat.default = False
                     stat.put()
 
@@ -616,7 +612,7 @@ class StatusInstanceHandler(restful.Controller):
             return
 
         # We may want to think more about this
-        events = Event.all().filter('status =', status).fetch(1000)
+        events = Event.query().filter(Event.status == status).fetch(1000)
         for event in events:
             event.delete()
 
@@ -643,7 +639,7 @@ class ImagesListHandler(restful.Controller):
         host = self.request.headers.get('host', 'nohost')
         images = []
 
-        for img in Image.all().fetch(1000):
+        for img in Image.query().fetch(1000):
             image = {
                 "url": "http://" + host + "/images/" + img.path,
                 "icon_set": img.icon_set,

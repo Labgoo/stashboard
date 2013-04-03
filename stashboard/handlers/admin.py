@@ -7,7 +7,7 @@ from django.conf import settings
 from google.appengine.api import memcache
 from google.appengine.api import taskqueue
 from google.appengine.api import users
-from google.appengine.ext import db
+from google.appengine.ext import ndb
 from google.appengine.ext import webapp
 from handlers import api
 from handlers import site
@@ -26,7 +26,7 @@ def default_template_data():
 
 
 def setup_occurred():
-    return InternalEvent.get_by_key_name("load_defaults") is not None
+    return InternalEvent.get_by_id("load_defaults") is not None
 
 
 def finish_setup():
@@ -70,7 +70,7 @@ class ServiceHandler(site.BaseHandler):
 
         td = default_template_data()
         td["services_selected"] = True
-        td["services"] = Service.all().order("name").fetch(1000)
+        td["services"] = Service.query().order(Service.name).fetch(1000)
         self.render(td, 'admin/services.html')
 
 
@@ -82,7 +82,7 @@ class ServiceInstanceHandler(site.BaseHandler):
             td = default_template_data()
             td["services_selected"] = True
             td["service"] = service
-            td["events"] = service.events.order("-start").fetch(1000)
+            td["events"] = service.events.order(-Service.start).fetch(1000)
             self.render(td, 'admin/services_instance.html')
         else:
             self.not_found()
@@ -122,7 +122,7 @@ class EditServiceHandler(site.BaseHandler):
             "slug": service.slug,
             "name": service.name,
             "action": "edit",
-            "service_lists": List.all().fetch(100),
+            "service_lists": List.query().fetch(100),
             }
 
         if service.list is not None:
@@ -141,7 +141,7 @@ class CreateServiceHandler(site.BaseHandler):
             "services_selected": True,
             "url": "/admin/api/v1/services",
             "action": "create",
-            "service_lists": List.all().fetch(100),
+            "service_lists": List.query().fetch(100),
             }
 
         td.update(site.default_template_data())
@@ -159,7 +159,7 @@ class UpdateStatusHandler(site.BaseHandler):
         td = {
             "services_selected": True,
             "service": service,
-            "statuses": Status.all().fetch(100),
+            "statuses": Status.query().fetch(100),
             }
 
         td.update(site.default_template_data())
@@ -186,7 +186,7 @@ class DeleteEventHandler(site.BaseHandler):
 
     def get(self, slug, key_str):
         service = Service.get_by_slug(slug)
-        event = db.get(key_str)
+        event = Event.get_by_id(key_str)
         if not service or not isinstance(event, Event):
             self.not_found()
             return
@@ -216,7 +216,7 @@ class EditStatusHandler(site.BaseHandler):
             "description": status.description,
             "name": status.name,
             "image_url": status.image,
-            "images": Image.all().fetch(200),
+            "images": Image.query().fetch(200),
             "default": status.default,
             }
 
@@ -246,7 +246,7 @@ class StatusHandler(site.BaseHandler):
     def get(self):
         td = default_template_data()
         td["statuses_selected"] = True
-        td["statuses"] = Status.all().order("name").fetch(1000)
+        td["statuses"] = Status.query().order(Status.name).fetch(1000)
         self.render(td, 'admin/status.html')
 
 
@@ -257,7 +257,7 @@ class CreateStatusHandler(site.BaseHandler):
             "statuses_selected": True,
             "action": "create",
             "url": "/admin/api/v1/statuses",
-            "images": Image.all().fetch(200),
+            "images": Image.query().fetch(200),
             }
 
         td.update(site.default_template_data())
@@ -306,7 +306,7 @@ class ListHandler(site.BaseHandler):
     def get(self):
         td = default_template_data()
         td["lists_selected"] = True
-        td["lists"] = List.all().order("name").fetch(1000)
+        td["lists"] = List.query().order(List.name).fetch(1000)
         self.render(td, 'admin/list.html')
 
 class CreateListHandler(site.BaseHandler):
@@ -333,7 +333,7 @@ class MigrationHandler(site.BaseHandler):
 
     def get(self):
         td = default_template_data()
-        td["migrations"] = migrations.all()
+        td["migrations"] = migrations.query()
         self.render(td, "admin/migrations.html")
 
     def post(self):
@@ -346,7 +346,7 @@ class MigrationHandler(site.BaseHandler):
         taskqueue.add(url="/admin/migrations/%s" % migration)
 
         td = default_template_data()
-        td["migrations"] = migrations.all()
+        td["migrations"] = migrations.query()
         td["notice"] = "Migration %s started. Check the logs for output" % migration
         self.render(td, "admin/migrations.html")
 
@@ -356,7 +356,7 @@ class CredentialHandler(site.BaseHandler):
     def get(self):
 
         user = users.get_current_user()
-        profile = Profile.all().filter('owner = ', user).get()
+        profile = Profile.query().filter(Profile.owner == user).get()
 
         td = default_template_data()
         td["credentials_selected"] = True

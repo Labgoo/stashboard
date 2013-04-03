@@ -70,7 +70,7 @@ class UpdateStatusMigration(Migration):
     def run(self):
         logging.info("Update each status")
         # For each status
-        for status in Status.all().fetch(100):
+        for status in Status.query().fetch(100):
 
             # Set the status to default
             status.default = False

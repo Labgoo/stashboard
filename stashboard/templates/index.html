@@ -22,7 +22,7 @@
 	  {% if service.has_issues %}
 	    <img class="information" src="/images/small-information.png" alt="Had Issues"/>
 	  {% endif %}
-	  <img class="sym" src="/images/{{ service.status.image }}" alt="{{ service.status.title }}"/>
+	  <img class="sym" src="/images/{{ service.status.get.image }}" alt="{{ service.status.get.title }}"/>
 	</a>
       </td>
       {% for h in service.history %}

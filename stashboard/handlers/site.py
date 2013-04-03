@@ -22,7 +22,6 @@
 
 __author__ = 'Kyle Conroy'
 
-import datetime
 import calendar
 import logging
 import os
@@ -34,9 +33,9 @@ import urlparse
 from google.appengine.api import memcache
 from google.appengine.api import users
 from google.appengine.ext import webapp
-from google.appengine.ext import db
+from google.appengine.ext import ndb
 
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 from django.conf import settings
 from django.template.loader import render_to_string
 from django.utils import simplejson as json
@@ -64,14 +63,13 @@ def default_template_data():
 
 
 def get_past_days(num):
-    date = datetime.date.today()
+    from_date = date.today()
     dates = []
 
     for i in range(1, num + 1):
-        dates.append(date - datetime.timedelta(days=i))
+        dates.append(from_date - timedelta(days=i))
 
     return dates
-
 
 class BaseHandler(webapp.RequestHandler):
 
@@ -122,17 +120,16 @@ class RootHandler(BaseHandler):
         services = []
         default_status = Status.get_default()
 
-        for service in Service.all().order("list").order("name").fetch(100):
+        for service in Service.query().order(Service.list).order(Service.name).fetch(100):
             event = service.current_event()
             if event is not None:
                 status = event.status
             else:
                 status = default_status
 
-            today = date.today() + timedelta(days=1)
+            today = datetime.today() + timedelta(days=1)
             current, = service.history(1, default_status, start=today)
-            has_issues = (current["information"] and
-                          status.key() == default_status.key())
+            has_issues = current["information"] and status.key == default_status.key
 
             service_dict = {
                 "slug": service.slug,
@@ -146,7 +143,7 @@ class RootHandler(BaseHandler):
 
         return {
             "days": get_past_days(5),
-            "statuses": Status.all().fetch(100),
+            "statuses": Status.query().fetch(100),
             "services": services,
             }
 
@@ -164,7 +161,7 @@ class ListHandler(BaseHandler):
         services = []
         default_status = Status.get_default()
 
-        query = Service.all().filter("list =", self.list).order("name")
+        query = Service.query().filter(Service.list == self.list).order(Service.name)
 
         for service in query.fetch(100):
             event = service.current_event()
@@ -173,10 +170,9 @@ class ListHandler(BaseHandler):
             else:
                 status = default_status
 
-            today = date.today() + timedelta(days=1)
+            today = datetime.today() + timedelta(days=1)
             current, = service.history(1, default_status, start=today)
-            has_issues = (current["information"] and
-                          status.key() == default_status.key())
+            has_issues = current["information"] and status.key == default_status.key
 
             service_dict = {
                 "slug": service.slug,
@@ -190,7 +186,7 @@ class ListHandler(BaseHandler):
 
         return {
             "days": get_past_days(5),
-            "statuses": Status.all().fetch(100),
+            "statuses": Status.query().fetch(100),
             "services": services,
             }
 
@@ -221,7 +217,7 @@ class ListListHandler(BaseHandler):
             if l is not None:
                 lists.append(l)
 
-        for service in Service.all().filter("list IN", lists).order("name").fetch(100):
+        for service in Service.query().filter(Service.list in lists).order(Service.name).fetch(100):
             event = service.current_event()
             if event is not None:
                 status = event.status
@@ -230,10 +226,9 @@ class ListListHandler(BaseHandler):
 
             if len(self.statuses) and not status.slug in self.statuses: continue
 
-            today = date.today() + timedelta(days=1)
+            today = datetime.today() + timedelta(days=1)
             current, = service.history(1, default_status, start=today)
-            has_issues = (current["information"] and
-                          status.key() == default_status.key())
+            has_issues = current["information"] and status.key == default_status.key
 
             service_dict = {
                 "slug": service.slug,
@@ -247,7 +242,7 @@ class ListListHandler(BaseHandler):
 
         return {
             "days": get_past_days(5),
-            "statuses": Status.all().fetch(100),
+            "statuses": Status.query().fetch(100),
             "services": services,
             }
 
@@ -269,7 +264,7 @@ class ListSummaryHandler(BaseHandler):
         lists = {}
         default_status = Status.get_default()
 
-        for service in Service.all().order("list").fetch(100):
+        for service in Service.query.order(Service.list).fetch(100):
             event = service.current_event()
             if event is not None:
                 status = event.status
@@ -282,7 +277,7 @@ class ListSummaryHandler(BaseHandler):
 
         return {
             "lists": lists.items(),
-            "statuses": Status.all().fetch(100),
+            "statuses": Status.query().fetch(100),
             }
 
     def get(self):
@@ -326,9 +321,9 @@ class ServiceHandler(BaseHandler):
             events.filter('start >= ', start_date).filter('start <', end_date)
 
         td = default_template_data()
-        td["statuses"] = Status.all().fetch(100)
+        td["statuses"] = Status.query().fetch(100)
         td["service"] = service
-        td["events"] = events.order("-start").fetch(500)
+        td["events"] = events.order(-Event.start).fetch(500)
 
         self.render(td, 'service.html')
 
@@ -376,7 +371,7 @@ class RSSHandler(BaseHandler):
         base_url = self.request.scheme + "://" + host
 
         events = []
-        query = Event.all().order("-start")
+        query = Event.query().order(-Event.start)
 
         # Filter query by requested services, if specified in the 'service' URL parameter.
         service_list = []
@@ -416,7 +411,7 @@ class RSSHandler(BaseHandler):
             'link': lambda(event): '%s/services/%s' % (base_url, event.service.slug),
             'category': lambda(event): event.service.name,
             'pubDate': lambda(event): format_date_time(mktime(event.start.timetuple())),
-            'guid': lambda(event): '%s/api/v1/services/%s/events/%s' % (base_url, event.service.slug, unicode(event.key()))
+            'guid': lambda(event): '%s/api/v1/services/%s/events/%s' % (base_url, event.service.slug, unicode(event.key))
         }
 
         for event in query.fetch(settings.RSS_NUM_EVENTS_TO_FETCH):
