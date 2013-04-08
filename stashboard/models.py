@@ -145,7 +145,7 @@ class Service(ndb.Model):
     @ndb.tasklet
     def current_event_async(self):
         event = yield self.events.order(-Event.start).fetch_async(1)
-        raise ndb.Return(event[0])
+        raise ndb.Return(event[0] if event else None)
 
     def url(self):
         return "/services/%s" % self.slug
