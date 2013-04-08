@@ -331,15 +331,15 @@ class ServiceHandler(BaseHandler):
 
         try:
             if day:
-                start_date = date(int(year), int(month), int(day))
+                start_date = datetime(int(year), int(month), int(day))
                 end_date = start_date + timedelta(days=1)
             elif month:
-                start_date = date(int(year), int(month), 1)
+                start_date = datetime(int(year), int(month), 1)
                 days = calendar.monthrange(start_date.year,
                                            start_date.month)[1]
                 end_date = start_date + timedelta(days=days)
             elif year:
-                start_date = date(int(year), 1, 1)
+                start_date = datetime(int(year), 1, 1)
                 end_date = start_date + timedelta(days=365)
             else:
                 start_date = None
@@ -351,7 +351,7 @@ class ServiceHandler(BaseHandler):
         events = service.events
 
         if start_date and end_date:
-            events.filter('start >= ', start_date).filter('start <', end_date)
+            events.filter(Event.start >= start_date).filter(Event.start < end_date)
 
         td = default_template_data()
         td["statuses"] = Status.query().fetch(100)
