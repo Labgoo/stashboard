@@ -94,7 +94,6 @@ class ListsListHandler(restful.Controller):
             return
 
         name = self.request.get('name', default_value=None)
-        slug = self.request.get('slug')
         description = self.request.get('description', default_value=None)
 
         if not name or not description:
@@ -102,7 +101,7 @@ class ListsListHandler(restful.Controller):
                            % (name, description))
             return
 
-        slug = slug or slugify.slugify(name)
+        slug = self.request.get('slug') or slugify.slugify(name)
         existing_s = List.get_by_slug(slug)
 
         if existing_s:
@@ -220,7 +219,7 @@ class ServicesListHandler(restful.Controller):
             self.error(400, "Bad list slug: %s" % slist)
             return
 
-        slug = slugify.slugify(name)
+        slug = self.request.get('slug') or slugify.slugify(name)
         existing_s = Service.get_by_slug(slug)
 
         if existing_s:
