@@ -234,6 +234,14 @@ class ServicesListHandler(restful.Controller):
         self.response.set_status(201)
         self.json(s.rest(self.base_url(version)))
 
+@ndb.toplevel
+def delete_multi(q, bulk_size=100):
+    while True:
+        events = q.fetch(bulk_size, keys_only=True)
+        if not events:
+            break
+        
+        yield ndb.delete_multi_async(events)
 
 class ServiceInstanceHandler(restful.Controller):
 
@@ -303,12 +311,11 @@ class ServiceInstanceHandler(restful.Controller):
             self.error(404, "Service %s not found" % service_slug)
             return
 
-        query = Event.query().filter(Event.service == service)
-        for e in query:
-            e.key.delete()
+        delete_multi(Event.query().filter(Event.service == service.key))
+
+        service.key.delete()
 
         invalidate_cache()
-        service.delete()
         self.json(service.rest(self.base_url(version)))
 
 
@@ -327,7 +334,7 @@ class EventsListHandler(restful.Controller):
         start = self.request.get('start', default_value=None)
         end = self.request.get('end', default_value=None)
 
-        query = Event.query().filter(Event.service == service)
+        query = Event.query().filter(Event.service == service.key)
 
         if start:
             try:
@@ -609,9 +616,7 @@ class StatusInstanceHandler(restful.Controller):
             return
 
         # We may want to think more about this
-        events = Event.query().filter(Event.status == status).fetch(1000)
-        for event in events:
-            event.delete()
+        delete_multi(Event.query().filter(Event.status == status))
 
         status.delete()
         self.json(status.rest(self.base_url(version)))
